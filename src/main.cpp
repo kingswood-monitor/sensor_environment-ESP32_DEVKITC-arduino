@@ -83,7 +83,7 @@ void loop()
 
   updateReadings();
 
-  delay(3000);
+  delay(REFRESH_MILLIS);
 }
 
 /** Callback funciton for main loop to update and publish readings 
