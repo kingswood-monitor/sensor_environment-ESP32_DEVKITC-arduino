@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include <Adafruit_NeoPixel.h>
 
 #include "CompositeSensor.h"
 #include "sensor-utils.h"
@@ -38,6 +39,12 @@ PubSubClient mqttClient(espClient);
 // Initialise sensors
 CompositeSensor mySensor;
 
+// Neopixels
+#define PIN 18
+#define NUMPIXELS 1
+Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+#define DELAYVAL 500
+
 void setup_wifi();
 void reconnect();
 void updateReadings();
@@ -48,6 +55,8 @@ void setup()
 {
   Serial.begin(115200);
   delay(2000);
+
+  pixels.begin();
 
   //preferences
   preferences.begin("sensor", false);
@@ -78,6 +87,15 @@ unsigned int cnt = 0;
 bool state = true;
 void loop()
 {
+
+  pixels.clear();
+  for (int i = 0; i < NUMPIXELS; i++)
+  {
+    pixels.setPixelColor(i, pixels.Color(150, 150, 0));
+    pixels.show();
+    delay(DELAYVAL);
+  }
+
   if (!mqttClient.connected())
     reconnect();
 
