@@ -3,7 +3,6 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
-#include <Ticker.h>
 #include "FastLED.h"
 
 #include "CompositeSensor.h"
@@ -43,15 +42,13 @@ PubSubClient mqttClient(espClient);
 
 // Initialise sensors
 CompositeSensor mySensor;
+CompositeSensor::SensorReadings readings;
 
 // StatusLED
 StatusLED statusLED;
-CRGB data_colour = CRGB::Green;
+CRGB data_colour = CRGB::White;
 CRGB wifi_colour = CRGB::Blue;
 CRGB error_colour = CRGB::Red;
-
-// timers
-Ticker readings_updater;
 
 void setup_wifi();
 void reconnect();
@@ -100,8 +97,9 @@ void loop()
 {
 
   mqttClient.loop();
-
   updateReadings();
+
+  statusLED.colour(readings.temp, 17.0, 25.0);
 
   delay(REFRESH_MILLIS);
 }
@@ -119,8 +117,7 @@ void updateReadings()
   publish_int(cfg_client_id, "data/humidity", readings.humidity);
   publish_int(cfg_client_id, "data/co2", readings.co2);
 
-  // statusLED.flash(data_colour, 50);
-  statusLED.colour(readings.temp, 15.0, 25.0);
+  statusLED.flash(data_colour, 100);
 
   char buf[100];
   sprintf(buf, "T:%.1f, H:%.0f%, CO2:%d", readings.temp, readings.humidity, readings.co2);
