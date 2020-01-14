@@ -3,7 +3,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
-#include <Adafruit_NeoPixel.h>
+#include "FastLED.h"
 
 #include "CompositeSensor.h"
 #include "sensor-utils.h"
@@ -26,7 +26,7 @@ int client_id;
 #define FIRMWARE_NAME "Environment Sensor"
 #define FIRMWARE_SLUG "sensor_environment-ESP32_DEVKITC-arduino"
 #define FIRMWARE_VERSION "0.2"
-#define REFRESH_MILLIS 3000
+#define REFRESH_MILLIS 1000
 
 String device_id;
 String make_device_id(String device_type, int id);
@@ -39,11 +39,10 @@ PubSubClient mqttClient(espClient);
 // Initialise sensors
 CompositeSensor mySensor;
 
-// Neopixels
-#define PIN 18
-#define NUMPIXELS 1
-Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
-#define DELAYVAL 500
+// FastLED
+#define DATA_PIN 18
+#define NUM_LEDS 1
+CRGB leds[NUM_LEDS];
 
 void setup_wifi();
 void reconnect();
@@ -56,7 +55,7 @@ void setup()
   Serial.begin(115200);
   delay(2000);
 
-  pixels.begin();
+  FastLED.addLeds<WS2812, DATA_PIN>(leds, NUM_LEDS);
 
   //preferences
   preferences.begin("sensor", false);
@@ -87,14 +86,12 @@ unsigned int cnt = 0;
 bool state = true;
 void loop()
 {
-
-  pixels.clear();
-  for (int i = 0; i < NUMPIXELS; i++)
-  {
-    pixels.setPixelColor(i, pixels.Color(150, 150, 0));
-    pixels.show();
-    delay(DELAYVAL);
-  }
+  leds[0] = CRGB::Green;
+  FastLED.show();
+  delay(30);
+  leds[0] = CRGB::Black;
+  FastLED.show();
+  delay(30);
 
   if (!mqttClient.connected())
     reconnect();
