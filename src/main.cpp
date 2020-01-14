@@ -46,9 +46,12 @@ CompositeSensor mySensor;
 
 // StatusLED
 StatusLED statusLED;
-CRGB data_colour;
-CRGB wifi_colour;
-CRGB error_colour;
+CRGB data_colour = CRGB::Green;
+CRGB wifi_colour = CRGB::Blue;
+CRGB error_colour = CRGB::Red;
+
+// timers
+Ticker readings_updater;
 
 void setup_wifi();
 void reconnect();
@@ -61,9 +64,7 @@ void setup()
   Serial.begin(115200);
   delay(2000);
 
-  data_colour = CRGB::Green;
-  wifi_colour = CRGB::Blue;
-  error_colour = CRGB::Red;
+  mySensor.begin();
 
   //preferences
   preferences.begin("sensor", false);
@@ -85,15 +86,12 @@ void setup()
     cfg_pinned_led = preferences.getBool("pinned_led", false);
   }
 
-  statusLED.drivers(cfg_pinned_led);
-
-  device_id = make_device_id(cfg_device_type, cfg_client_id);
+  device_id = make_device_id(cfg_device_type, cfg_client_id); // TODO refactor this into printBanner
   utils::printBanner(FIRMWARE_NAME, FIRMWARE_SLUG, FIRMWARE_VERSION, device_id.c_str());
 
+  statusLED.drivers(cfg_pinned_led);
   setup_wifi();
   mqttClient.setServer(mqtt_server, 1883);
-
-  mySensor.begin();
 }
 
 unsigned int cnt = 0;
@@ -110,7 +108,7 @@ void loop()
   delay(REFRESH_MILLIS);
 }
 
-/** Callback funciton for main loop to update and publish readings 
+/** Callback function for main loop to update and publish readings 
 */
 void updateReadings()
 {
