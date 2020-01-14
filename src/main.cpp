@@ -14,13 +14,16 @@
 /*************************** Settings *******************************************************
  *  Configuration settings stored in permanent FLASH memory                            
  */
-Preferences preferences;
-String device_type;
-int client_id;
-
 #define WRITE_SETTINGS false
-#define DEVICE_TYPE "ESP32_DEVKITC"
-#define CLIENT_ID 5 // See Location Scheme for location mapping
+
+#define CFG_DEVICE_TYPE "ESP32_DEVKITC"
+#define CFG_CLIENT_ID 4     // 4=livingroom, 5=bedroom : See Location Scheme for location mapping
+#define CFG_PINNED_LED true // set true if the status LED is the long-pin type
+
+Preferences preferences;
+String cfg_device_type;
+int cfg_client_id;
+bool cfg_pinned_led;
 /*******************************************************************************************/
 
 #define FIRMWARE_NAME "Environment Sensor"
@@ -62,15 +65,17 @@ void setup()
 
   if (WRITE_SETTINGS)
   {
-    device_type = DEVICE_TYPE;
-    client_id = CLIENT_ID;
+    cfg_device_type = CFG_DEVICE_TYPE;
+    cfg_client_id = CFG_CLIENT_ID;
     preferences.putString("device_type", DEVICE_TYPE);
     preferences.putInt("client_id", CLIENT_ID);
+    preferences.putString("device_type", CFG_DEVICE_TYPE);
+    preferences.putInt("client_id", CFG_CLIENT_ID);
   }
   else
   {
-    device_type = preferences.getString("device_type", DEVICE_TYPE);
-    client_id = preferences.getInt("client_id", -1);
+    cfg_device_type = preferences.getString("device_type", CFG_DEVICE_TYPE);
+    cfg_client_id = preferences.getInt("client_id", -1);
   }
 
   device_id = make_device_id(device_type, client_id);
@@ -109,9 +114,9 @@ void updateReadings()
 {
   CompositeSensor::SensorReadings readings = mySensor.readSensors();
 
-  publish_float(client_id, "data/temperature", readings.temp);
-  publish_int(client_id, "data/humidity", readings.humidity);
-  publish_int(client_id, "data/co2", readings.co2);
+  publish_float(cfg_client_id, "data/temperature", readings.temp);
+  publish_int(cfg_client_id, "data/humidity", readings.humidity);
+  publish_int(cfg_client_id, "data/co2", readings.co2);
 
   char buf[100];
   sprintf(buf, "T:%.1f, H:%.0f%, CO2:%d", readings.temp, readings.humidity, readings.co2);
