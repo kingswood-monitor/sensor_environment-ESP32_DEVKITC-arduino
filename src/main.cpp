@@ -6,6 +6,7 @@
 #include "FastLED.h"
 
 #include "CompositeSensor.h"
+#include "StatusLED.h"
 #include "sensor-utils.h"
 
 #include "secrets.h"
@@ -29,7 +30,7 @@ bool cfg_pinned_led;
 #define FIRMWARE_NAME "Environment Sensor"
 #define FIRMWARE_SLUG "sensor_environment-ESP32_DEVKITC-arduino"
 #define FIRMWARE_VERSION "0.2"
-#define REFRESH_MILLIS 1000
+#define REFRESH_MILLIS 10000
 
 String device_id;
 String make_device_id(String device_type, int id);
@@ -42,10 +43,11 @@ PubSubClient mqttClient(espClient);
 // Initialise sensors
 CompositeSensor mySensor;
 
-// FastLED
-#define DATA_PIN 18
-#define NUM_LEDS 1
-CRGB leds[NUM_LEDS];
+// StatusLE
+StatusLED statusLED;
+CRGB data_colour;
+CRGB wifi_colour;
+CRGB error_colour;
 
 void setup_wifi();
 void reconnect();
@@ -58,7 +60,9 @@ void setup()
   Serial.begin(115200);
   delay(2000);
 
-  FastLED.addLeds<WS2812, DATA_PIN>(leds, NUM_LEDS);
+  data_colour = CRGB::Green;
+  wifi_colour = CRGB::Blue;
+  error_colour = CRGB::Red;
 
   //preferences
   preferences.begin("sensor", false);
@@ -67,18 +71,22 @@ void setup()
   {
     cfg_device_type = CFG_DEVICE_TYPE;
     cfg_client_id = CFG_CLIENT_ID;
-    preferences.putString("device_type", DEVICE_TYPE);
-    preferences.putInt("client_id", CLIENT_ID);
+    cfg_pinned_led = CFG_PINNED_LED;
+
     preferences.putString("device_type", CFG_DEVICE_TYPE);
     preferences.putInt("client_id", CFG_CLIENT_ID);
+    preferences.putBool("pinned_led", CFG_PINNED_LED);
   }
   else
   {
     cfg_device_type = preferences.getString("device_type", CFG_DEVICE_TYPE);
     cfg_client_id = preferences.getInt("client_id", -1);
+    cfg_pinned_led = preferences.getBool("pinned_led", false);
   }
 
-  device_id = make_device_id(device_type, client_id);
+  statusLED.drivers(cfg_pinned_led);
+
+  device_id = make_device_id(cfg_device_type, cfg_client_id);
   utils::printBanner(FIRMWARE_NAME, FIRMWARE_SLUG, FIRMWARE_VERSION, device_id.c_str());
 
   setup_wifi();
@@ -91,12 +99,6 @@ unsigned int cnt = 0;
 bool state = true;
 void loop()
 {
-  leds[0] = CRGB::Green;
-  FastLED.show();
-  delay(30);
-  leds[0] = CRGB::Black;
-  FastLED.show();
-  delay(30);
 
   if (!mqttClient.connected())
     reconnect();
@@ -117,6 +119,8 @@ void updateReadings()
   publish_float(cfg_client_id, "data/temperature", readings.temp);
   publish_int(cfg_client_id, "data/humidity", readings.humidity);
   publish_int(cfg_client_id, "data/co2", readings.co2);
+
+  statusLED.flash(data_colour, 50);
 
   char buf[100];
   sprintf(buf, "T:%.1f, H:%.0f%, CO2:%d", readings.temp, readings.humidity, readings.co2);
@@ -143,6 +147,7 @@ void setup_wifi()
 
   while (WiFi.status() != WL_CONNECTED)
   {
+    statusLED.flash(wifi_colour, 50);
     delay(500);
     Serial.print(".");
   }
@@ -158,6 +163,8 @@ void reconnect()
   // Loop until we're reconnected
   while (!mqttClient.connected())
   {
+    statusLED.flash(error_colour, 50);
+
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
     if (mqttClient.connect(device_id.c_str()))
