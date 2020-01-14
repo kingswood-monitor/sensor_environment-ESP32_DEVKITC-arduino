@@ -98,8 +98,6 @@ unsigned int cnt = 0;
 bool state = true;
 void loop()
 {
-  if (!mqttClient.connected())
-    reconnect();
 
   mqttClient.loop();
 
@@ -112,7 +110,10 @@ void loop()
 */
 void updateReadings()
 {
-  CompositeSensor::SensorReadings readings = mySensor.readSensors();
+  readings = mySensor.readSensors();
+
+  if (!mqttClient.connected())
+    reconnect();
 
   publish_float(cfg_client_id, "data/temperature", readings.temp);
   publish_int(cfg_client_id, "data/humidity", readings.humidity);
