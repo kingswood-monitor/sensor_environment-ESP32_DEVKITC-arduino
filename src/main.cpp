@@ -54,6 +54,8 @@ void setup()
 
   if (WRITE_SETTINGS)
   {
+    device_type = DEVICE_TYPE;
+    client_id = CLIENT_ID;
     preferences.putString("device_type", DEVICE_TYPE);
     preferences.putInt("client_id", CLIENT_ID);
   }
