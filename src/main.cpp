@@ -1,127 +1,189 @@
+#define BLYNK_PRINT Serial
+#define BLYNK_NO_FANCY_LOGO
+
 #include <Arduino.h>
-#include <SPI.h>
 #include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include <Wire.h>
 #include "FastLED.h"
 
+#include "KWConfig.h"
 #include "CompositeSensor.h"
 #include "StatusLED.h"
-#include "sensor-utils.h"
 
 #include "secrets.h"
-#include "settings.h"
 
 /*************************** Settings *******************************************************
  *  Configuration settings stored in permanent FLASH memory                            
  */
 #define WRITE_SETTINGS false
 
-#define CFG_DEVICE_TYPE "ESP32_DEVKITC"
 #define CFG_CLIENT_ID 4     // 4=livingroom, 5=bedroom : See Location Scheme for location mapping
 #define CFG_PINNED_LED true // set true if the status LED is the long-pin type
 
 Preferences preferences;
-String cfg_device_type;
 int cfg_client_id;
 bool cfg_pinned_led;
 /*******************************************************************************************/
 
-#define FIRMWARE_NAME "Environment Sensor"
-#define FIRMWARE_SLUG "sensor_environment-ESP32_DEVKITC-arduino"
-#define FIRMWARE_VERSION "0.2"
-#define REFRESH_MILLIS 10000
-
-String device_id;
-String make_device_id(String device_type, int id);
-
-// WiFi / MQTT configuration
+// MQTT configuration
 IPAddress mqtt_server(192, 168, 1, 30);
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
+char info_topic[20];
+char temp_topic[20];
+char humidity_topic[20];
+char co2_topic[20];
 
-// Initialise sensors
-CompositeSensor mySensor;
-CompositeSensor::SensorReadings readings;
+// displayable measures
+float temperature = 0.0;
+int humidity = 0;
+int co2 = 0;
+
+// sensor readings refresh time (millis)
+int sensor_refresh_millis = KW_DEFAULT_REFRESH_MILLIS;
 
 // StatusLED
 StatusLED statusLED;
 CRGB data_colour = CRGB::White;
 CRGB wifi_colour = CRGB::Blue;
 CRGB error_colour = CRGB::Red;
+float status_led_brightness = KW_DEFAULT_STATUS_LED_BRIGHTNESS;
 
-void setup_wifi();
-void reconnect();
-void updateReadings();
-void publish_float(int client, char *topic, float val);
-void publish_int(int client, char *topic, int val);
+// timers
+BlynkTimer update_readings_timer;
+BlynkTimer breather_timer;
+BlynkTimer led_blink_timer;
+
+// chip id
+char chip_id[20];
+
+// Initialise sensors
+CompositeSensor mySensor;
+CompositeSensor::SensorReadings readings;
+
+void logo(char *title, char *version, char *type);
+void generate_chip_id();
+void reconnect_mqtt();
+void update_readings();
+void make_topic(char *buf, int client_id, char *topic);
+void colourChange();
+void publish_float(char *topic, float val);
+void publish_int(char *topic, int val);
 
 void setup()
 {
+  Wire.begin(I2C_SDA, I2C_SCL);
+  // pinMode(LED_RED, OUTPUT);
+  // pinMode(LED_BLUE, OUTPUT);
+  // digitalWrite(LED_BLUE, LOW);
+  // digitalWrite(LED_RED, LOW);
+
   Serial.begin(115200);
   delay(2000);
 
   mySensor.begin();
 
-  //preferences
+  //preferences **************************************************************************
   preferences.begin("sensor", false);
 
   if (WRITE_SETTINGS)
   {
-    cfg_device_type = CFG_DEVICE_TYPE;
     cfg_client_id = CFG_CLIENT_ID;
     cfg_pinned_led = CFG_PINNED_LED;
 
-    preferences.putString("device_type", CFG_DEVICE_TYPE);
     preferences.putInt("client_id", CFG_CLIENT_ID);
     preferences.putBool("pinned_led", CFG_PINNED_LED);
   }
   else
   {
-    cfg_device_type = preferences.getString("device_type", CFG_DEVICE_TYPE);
     cfg_client_id = preferences.getInt("client_id", -1);
     cfg_pinned_led = preferences.getBool("pinned_led", false);
   }
+  // preferences ************************************************************************
 
-  device_id = make_device_id(cfg_device_type, cfg_client_id); // TODO refactor this into printBanner
-  utils::printBanner(FIRMWARE_NAME, FIRMWARE_SLUG, FIRMWARE_VERSION, device_id.c_str());
+  logo(FIRMWARE_NAME, FIRMWARE_VERSION, DEVICE_TYPE);
+
+  generate_chip_id();
+  BLYNK_LOG("Chip ID: %s", chip_id);
 
   statusLED.drivers(cfg_pinned_led);
-  setup_wifi();
+
+  // setup MQTT
   mqttClient.setServer(mqtt_server, 1883);
+  make_topic(info_topic, cfg_client_id, "info/status");
+  make_topic(co2_topic, cfg_client_id, "data/co2");
+  make_topic(temp_topic, cfg_client_id, "data/temperature");
+  make_topic(humidity_topic, cfg_client_id, "data/humidity");
+
+  // configure timers
+  update_readings_timer.setInterval(KW_DEFAULT_REFRESH_MILLIS, update_readings);
+  breather_timer.setInterval(1L, colourChange);
+
+  Blynk.begin(BLYNK_AUTH, SSID, PASSWD);
+  digitalWrite(LED_BLUE, HIGH);
 }
 
 unsigned int cnt = 0;
 bool state = true;
+
 void loop()
 {
 
+  Blynk.run();
+  update_readings_timer.run();
+  breather_timer.run();
+
   mqttClient.loop();
-  updateReadings();
+}
 
-  statusLED.colour(readings.temp, 17.0, 25.0);
+void colourChange()
+{
+  statusLED.colour(temperature, KW_DEFAULT_TEMPERATURE_MIN, KW_DEFAULT_TEMPERATURE_MAX);
+}
 
-  delay(REFRESH_MILLIS);
+void generate_chip_id()
+{
+  uint64_t chipid = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
+  uint16_t chip = (uint16_t)(chipid >> 32);
+  sprintf(chip_id, "ESP32-%04X-%08X", chip, (uint32_t)chipid);
+}
+
+void logo(char *title, char *version, char *type)
+{
+  char strap_line[200];
+  sprintf(strap_line, "                  |___/  %s v%s on %s", title, version, type);
+
+  Serial.println("  _  __ _                                                _ ");
+  Serial.println(" | |/ /(_) _ __    __ _  ___ __      __ ___    ___    __| |");
+  Serial.println(" | ' / | || '_ \\  / _` |/ __|\\ \\ /\\ / // _ \\  / _ \\  / _` |");
+  Serial.println(" | . \\ | || | | || (_| |\\__ \\ \\ V  V /| (_) || (_) || (_| |");
+  Serial.println(" |_|\\_\\|_||_| |_| \\__, ||___/  \\_/\\_/  \\___/  \\___/  \\__,_|");
+  Serial.println(strap_line);
+  Serial.println();
 }
 
 /** Callback function for main loop to update and publish readings 
 */
-void updateReadings()
+void update_readings()
 {
   readings = mySensor.readSensors();
 
   if (!mqttClient.connected())
-    reconnect();
+    reconnect_mqtt();
 
-  publish_float(cfg_client_id, "data/temperature", readings.temp);
-  publish_int(cfg_client_id, "data/humidity", readings.humidity);
-  publish_int(cfg_client_id, "data/co2", readings.co2);
+  temperature = readings.temp;
+  humidity = readings.humidity;
+  co2 = readings.co2;
 
-  statusLED.flash(data_colour, 100);
+  publish_float(temp_topic, readings.temp);
+  publish_int(humidity_topic, readings.humidity);
+  publish_int(co2_topic, readings.co2);
 
-  char buf[100];
-  sprintf(buf, "T:%.1f, H:%.0f%, CO2:%d", readings.temp, readings.humidity, readings.co2);
-  Serial.println(buf);
+  BLYNK_LOG("T:%.1f, H:%d%, CO2:%d", temperature, humidity, co2);
 }
 
 String make_device_id(String device_type, int id)
@@ -131,78 +193,48 @@ String make_device_id(String device_type, int id)
 
 /************** WiFi / MQTT  *******************************************************************/
 
-void setup_wifi()
+void reconnect_mqtt()
 {
-
-  delay(10);
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(SSID);
-
-  WiFi.begin(SSID, PASSWD);
-
-  while (WiFi.status() != WL_CONNECTED)
+  if (!mqttClient.connected())
   {
-    statusLED.flash(wifi_colour, 50);
-    delay(500);
-    Serial.print(".");
-  }
+    // statusLED.flash(error_colour, 50);
 
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void reconnect()
-{
-  // Loop until we're reconnected
-  while (!mqttClient.connected())
-  {
-    statusLED.flash(error_colour, 50);
-
-    Serial.print("Attempting MQTT connection...");
+    BLYNK_LOG("Attempting MQTT connection...");
     // Attempt to connect
-    if (mqttClient.connect(device_id.c_str()))
+    if (mqttClient.connect(chip_id))
     {
-      Serial.println("connected");
+      BLYNK_LOG("MQTT connected");
+
       // Once connected, publish an announcement...
-      mqttClient.publish("outTopic", "hello world");
+      mqttClient.publish(info_topic, "ONLINE");
+      BLYNK_LOG("MQTT Published ONLINE to [%s]", info_topic);
+
       // ... and resubscribe
-      mqttClient.subscribe("inTopic");
     }
     else
     {
-      Serial.print("failed, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
-      delay(5000);
+      BLYNK_LOG("MQTT reconnect failed, rc=%d", mqttClient.state());
     }
   }
 }
 
-void publish_float(int client, char *topic, float val)
+void make_topic(char *buf, int client_id, char *topic)
 {
-  char val_buf[10];
-  char topic_buf[20];
-
-  sprintf(topic_buf, "%d/%s/", client, topic);
-  sprintf(val_buf, "%.1f", val);
-
-  mqttClient.publish(topic_buf, val_buf);
+  sprintf(buf, "%d/%s", client_id, topic);
 }
 
-void publish_int(int client, char *topic, int val)
+void publish_float(char *topic, float val)
 {
   char val_buf[10];
-  char topic_buf[20];
+  sprintf(val_buf, "%.1f", val);
+  mqttClient.publish(topic, val_buf);
+}
 
-  sprintf(topic_buf, "%d/%s/", client, topic);
+void publish_int(char *topic, int val)
+{
+  char val_buf[10];
   sprintf(val_buf, "%d", val);
-
-  mqttClient.publish(topic_buf, val_buf);
+  mqttClient.publish(topic, val_buf);
 }
 
 /***********************************************************************************************/

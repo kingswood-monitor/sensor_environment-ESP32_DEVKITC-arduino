@@ -2,11 +2,6 @@
 
 #include "FastLED.h"
 
-// FastLED
-#define DATA_PIN 18
-#define NUM_LEDS 1
-// #define LED_DRIVER NEOPIXEL
-
 CRGB leds[NUM_LEDS];
 
 class StatusLED
@@ -69,8 +64,8 @@ void StatusLED::colour(float val, float min, float max)
 
     pixelColour.sat = 255;
     pixelColour.hue = map(val, min, max, hue_max, 0);
-    // pixelColour.val = map(breathe(), 0, 255, 70, 255);
-    pixelColour.val = 128;
+    pixelColour.val = map(breathe(), 0, 255, 70, 255);
+    // pixelColour.val = 128;
 
     leds[0] = pixelColour;
     FastLED.show();
